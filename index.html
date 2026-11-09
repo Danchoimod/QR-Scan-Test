@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="vi" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mobile Web Camera QR Scanner (Offline Verification)</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0fdf4',
+                            500: '#22c55e',
+                            600: '#16a34a',
+                            700: '#15803d',
+                            dark: '#0f172a'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Html5-QRCode Scanner Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+    
+    <!-- CryptoJS Library for Offline TOTP Calculation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        
+        /* Scanner Video Element Fit */
+        #reader video {
+            object-fit: cover !important;
+            border-radius: 1.5rem;
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        #reader {
+            border: none !important;
+        }
+
+        /* Scan reticle overlay styling */
+        .scan-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            border-radius: 1.5rem;
+            box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.75);
+        }
+
+        .scan-laser {
+            position: absolute;
+            width: 80%;
+            height: 2px;
+            background: linear-gradient(90deg, rgba(34,197,94,0) 0%, rgba(34,197,94,1) 50%, rgba(34,197,94,0) 100%);
+            left: 10%;
+            animation: scanAnimation 2s infinite ease-in-out;
+        }
+
+        @keyframes scanAnimation {
+            0% { top: 20%; opacity: 0.2; }
+            50% { top: 75%; opacity: 1; }
+            100% { top: 20%; opacity: 0.2; }
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between p-4 max-w-md mx-auto relative select-none">
+
+    <!-- Top Navigation Header -->
+    <header class="flex items-center justify-between py-3 border-b border-slate-800">
+        <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
+                <i class="fa-solid fa-camera"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-sm text-slate-100">CheckIn QR Scanner</h1>
+                <span class="text-[10px] text-slate-400 block -mt-0.5">Mobile Web Kamera Engine</span>
+            </div>
+        </div>
+
+        <!-- Network Mode Switcher -->
+        <button id="netToggleBtn" onclick="toggleNetwork()" class="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 transition">
+            <i id="netIcon" class="fa-solid fa-wifi text-[10px]"></i>
+            <span id="netText">Online</span>
+        </button>
+    </header>
+
+    <!-- Secret Key Configuration Bar -->
+    <div class="my-3 bg-slate-900 p-3 rounded-2xl border border-slate-800 flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2 overflow-hidden">
+            <i class="fa-solid fa-key text-amber-400 text-xs"></i>
+            <span class="text-[11px] text-slate-400 font-medium whitespace-nowrap">Secret Key:</span>
+            <input type="text" id="sharedSecretInput" value="MY_SUPER_SECRET_KEY_2026" class="bg-slate-950 text-emerald-400 text-xs font-mono font-bold px-2 py-1 rounded-lg border border-slate-700 w-full focus:outline-none">
+        </div>
+        <button onclick="updateSecretKey()" class="text-[11px] bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-2.5 py-1 rounded-lg transition whitespace-nowrap">
+            Lưu
+        </button>
+    </div>
+
+    <!-- MAIN CAMERA SCANNER CONTAINER -->
+    <main class="flex-1 flex flex-col justify-center my-2">
+        <div class="relative w-full aspect-square bg-slate-900 rounded-3xl overflow-hidden border-2 border-slate-800 shadow-2xl flex items-center justify-center">
+            
+            <!-- Video Camera Viewport -->
+            <div id="reader" class="w-full h-full"></div>
+
+            <!-- Scan Laser Animation Overlay (Active when camera is running) -->
+            <div id="scanLaser" class="scan-laser hidden"></div>
+
+            <!-- Start Camera Button Prompt (If camera not started automatically) -->
+            <div id="cameraStartPrompt" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/90 p-6 text-center space-y-4">
+                <div class="w-16 h-16 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center text-2xl border border-emerald-500/30">
+                    <i class="fa-solid fa-qrcode"></i>
+                </div>
+                <div>
+                    <h2 class="font-bold text-base text-slate-100">Mở Camera Quét QR</h2>
+                    <p class="text-xs text-slate-400 mt-1">Trình duyệt sẽ yêu cầu cấp quyền Camera để quét mã</p>
+                </div>
+                <button onclick="startCameraScanner()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold text-sm rounded-xl transition shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-video"></i> Bật Camera Ngay
+                </button>
+            </div>
+
+            <!-- Camera Switch Button -->
+            <button id="switchCamBtn" onclick="switchCamera()" class="hidden absolute top-3 right-3 bg-slate-950/80 text-slate-300 p-2.5 rounded-full border border-slate-700 backdrop-blur-md text-xs">
+                <i class="fa-solid fa-camera-rotate"></i>
+            </button>
+        </div>
+
+        <p class="text-center text-[11px] text-slate-500 mt-3 flex items-center justify-center gap-1.5">
+            <i class="fa-solid fa-shield-halved text-emerald-400"></i>
+            Thuật toán TOTP tự đối chiếu trực tiếp trên máy (Offline Verified)
+        </p>
+    </main>
+
+    <!-- REALTIME SCAN RESULT MODAL / ALERT CARD -->
+    <div id="resultModal" class="hidden my-2 p-4 rounded-2xl border transition-all duration-300">
+        <!-- Dynamic message injected via JS -->
+    </div>
+
+    <!-- APP JAVASCRIPT CORE LOGIC -->
+    <script>
+        // ==================== STATE MANAGEMENT ====================
+        let SECRET_KEY = "MY_SUPER_SECRET_KEY_2026";
+        const TOTP_INTERVAL_SEC = 3; // Chu kỳ TOTP (3s)
+        let isOnline = true;
+        
+        let html5QrCode = null;
+        let isScanning = false;
+        let currentCameraId = null;
+        let availableCameras = [];
+        let currentCamIndex = 0;
+        let lastScannedToken = "";
+        let lastScanTime = 0;
+
+        let localAttendanceQueue = [];
+
+        // ==================== INITIALIZATION ====================
+        window.onload = function() {
+            // Kiểm tra bảo mật trình duyệt đối với Camera API
+            checkSecurityAndCameraSupport();
+            // Thử khởi động scanner
+            startCameraScanner();
+        };
+
+        function checkSecurityAndCameraSupport() {
+            const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+            const isHttps = window.location.protocol === 'https:';
+
+            if (!isHttps && !isLocalhost) {
+                const guideModal = document.getElementById("resultModal");
+                guideModal.className = "my-2 p-4 rounded-2xl border bg-amber-500/10 border-amber-500/30 text-amber-300 block text-xs leading-relaxed";
+                guideModal.innerHTML = `
+                    <div class="flex items-start gap-2">
+                        <i class="fa-solid fa-triangle-exclamation text-amber-400 text-sm mt-0.5"></i>
+                        <div>
+                            <strong class="font-bold text-amber-300">Trình duyệt Chrome Android chặn Camera qua HTTP!</strong>
+                            <p class="mt-1 text-slate-300">Khi truy cập bằng IP nội bộ (ví dụ: <code>http://192.168.x.x...</code>), Android mặc định không cho cấp quyền Camera trừ khi có HTTPS hoặc thêm ngoại lệ.</p>
+                            <div class="mt-2 bg-slate-900/80 p-2.5 rounded-xl border border-slate-800 text-[11px] text-slate-300">
+                                <strong>Cách khắc phục nhanh trên Chrome điện thoại:</strong>
+                                <ol class="list-decimal ml-4 mt-1 space-y-1">
+                                    <li>Mở tab mới trên Chrome Android gõ: <br><span class="text-amber-400 font-mono select-all font-bold">chrome://flags/#unsafely-treat-insecure-origin-as-secure</span></li>
+                                    <li>Bật (Enabled) và dán URL IP của máy bạn vào ô: <br><span class="text-emerald-400 font-mono select-all font-bold">${window.location.origin}</span></li>
+                                    <li>Nhấn nút <b>Relaunch</b> để khởi động lại Chrome.</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function updateSecretKey() {
+            const inputVal = document.getElementById("sharedSecretInput").value.trim();
+            if (inputVal) {
+                SECRET_KEY = inputVal;
+                showNotification("Đã cập nhật Secret Key!", "success");
+            }
+        }
+
+        function toggleNetwork() {
+            isOnline = !isOnline;
+            const btn = document.getElementById("netToggleBtn");
+            const icon = document.getElementById("netIcon");
+            const text = document.getElementById("netText");
+
+            if (isOnline) {
+                btn.className = "px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 transition";
+                icon.className = "fa-solid fa-wifi text-[10px]";
+                text.innerText = "Online";
+            } else {
+                btn.className = "px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5 transition";
+                icon.className = "fa-solid fa-plane text-[10px]";
+                text.innerText = "Offline";
+            }
+        }
+
+        // ==================== CAMERA SCANNER CONTROLLER ====================
+        async function startCameraScanner() {
+            try {
+                if (!html5QrCode) {
+                    html5QrCode = new Html5Qrcode("reader");
+                }
+
+                availableCameras = await Html5Qrcode.getCameras();
+                if (availableCameras && availableCameras.length > 0) {
+                    // Ưu tiên camera sau (environment)
+                    let backCam = availableCameras.find(cam => cam.label.toLowerCase().includes('back') || cam.label.toLowerCase().includes('rear'));
+                    currentCameraId = backCam ? backCam.id : availableCameras[0].id;
+
+                    const config = { 
+                        fps: 15, 
+                        qrbox: { width: 220, height: 220 },
+                        aspectRatio: 1.0
+                    };
+
+                    await html5QrCode.start(
+                        currentCameraId, 
+                        config, 
+                        onQrCodeScanned, 
+                        onScanError
+                    );
+
+                    isScanning = true;
+                    document.getElementById("cameraStartPrompt").classList.add("hidden");
+                    document.getElementById("scanLaser").classList.remove("hidden");
+                    
+                    if (availableCameras.length > 1) {
+                        document.getElementById("switchCamBtn").classList.remove("hidden");
+                    }
+                } else {
+                    alert("Không tìm thấy camera trên thiết bị!");
+                }
+            } catch (err) {
+                console.error("Camera Start Error: ", err);
+                document.getElementById("cameraStartPrompt").classList.remove("hidden");
+                
+                let errorMsg = "Không thể khởi động camera. ";
+                if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+                    errorMsg += "Do bạn đang truy cập bằng HTTP (IP nội bộ), Android cấm truy cập Camera. Vui lòng cấu hình Chrome Flag hoặc dùng HTTPS/Ngrok/Cloudflared.";
+                } else {
+                    errorMsg += (err && err.message) ? err.message : JSON.stringify(err);
+                }
+                showNotification(errorMsg, "error");
+            }
+        }
+
+        async function switchCamera() {
+            if (availableCameras.length < 2 || !html5QrCode) return;
+            currentCamIndex = (currentCamIndex + 1) % availableCameras.length;
+            currentCameraId = availableCameras[currentCamIndex].id;
+
+            await html5QrCode.stop();
+            startCameraScanner();
+        }
+
+        // ==================== QR SCAN CALLBACK & VERIFICATION ====================
+        function onQrCodeScanned(decodedText, decodedResult) {
+            const now = Date.now();
+            
+            // Debounce scanning duplicate code within 2 seconds
+            if (decodedText === lastScannedToken && (now - lastScanTime) < 2000) {
+                return;
+            }
+
+            lastScannedToken = decodedText;
+            lastScanTime = now;
+
+            // Trigger Offline Verification Engine
+            verifyScannedTokenOffline(decodedText.trim());
+        }
+
+        function onScanError(errorMessage) {
+            // Ignore frame scan errors
+        }
+
+        // ==================== TOTP OFFLINE ENGINE ====================
+        function calculateTOTP(secret, offsetBlocks = 0) {
+            const timeStepMs = TOTP_INTERVAL_SEC * 1000;
+            const timeBlock = Math.floor(Date.now() / timeStepMs) + offsetBlocks;
+            const hash = CryptoJS.HmacSHA256(timeBlock.toString(), secret);
+            return hash.toString(CryptoJS.enc.Hex).substring(0, 10).toUpperCase();
+        }
+
+        function verifyScannedTokenOffline(token) {
+            // Check TOTP against current block, previous block (-1), and next block (+1)
+            const tokenNow = calculateTOTP(SECRET_KEY, 0);
+            const tokenPrev = calculateTOTP(SECRET_KEY, -1);
+            const tokenNext = calculateTOTP(SECRET_KEY, 1);
+
+            const isValid = (token === tokenNow || token === tokenPrev || token === tokenNext);
+            const resultModal = document.getElementById("resultModal");
+
+            resultModal.classList.remove("hidden", "bg-emerald-950/80", "border-emerald-500/40", "text-emerald-300", "bg-red-950/80", "border-red-500/40", "text-red-300");
+
+            if (isValid) {
+                // --- SUCCESSFUL OFFLINE ATTENDANCE ---
+                resultModal.classList.add("bg-emerald-950/80", "border", "border-emerald-500/40", "text-emerald-300");
+                resultModal.innerHTML = `
+                    <div class="flex items-start gap-3">
+                        <div class="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-lg shrink-0 mt-0.5">
+                            <i class="fa-solid fa-circle-check"></i>
+                        </div>
+                        <div>
+                            <h3 class="font-bold text-sm text-white">Điểm Danh Thành Công!</h3>
+                            <p class="text-[11px] opacity-80 mt-0.5">
+                                Mã QR khớp hoàn toàn với thời gian thực và Secret Key.
+                            </p>
+                            <div class="mt-1.5 flex items-center gap-2 font-mono text-[10px]">
+                                <span class="bg-emerald-900/60 px-2 py-0.5 rounded text-emerald-300">Token: ${token}</span>
+                                <span class="text-slate-400">${new Date().toLocaleTimeString()}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                // Vibration feedback if supported
+                if (navigator.vibrate) navigator.vibrate(150);
+
+            } else {
+                // --- EXPIRED OR INVALID QR ---
+                resultModal.classList.add("bg-red-950/80", "border", "border-red-500/40", "text-red-300");
+                resultModal.innerHTML = `
+                    <div class="flex items-start gap-3">
+                        <div class="w-8 h-8 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center font-bold text-lg shrink-0 mt-0.5">
+                            <i class="fa-solid fa-circle-xmark"></i>
+                        </div>
+                        <div>
+                            <h3 class="font-bold text-sm text-white">Mã QR Không Hợp Lệ Hoặc Hết Hạn!</h3>
+                            <p class="text-[11px] opacity-80 mt-0.5">
+                                Mã không nằm trong cửa sổ thời gian ±3s của máy. Đã bị từ chối.
+                            </p>
+                        </div>
+                    </div>
+                `;
+
+                if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+            }
+        }
+
+        function showNotification(msg, type) {
+            alert(msg);
+        }
+    </script>
+</body>
+</html>

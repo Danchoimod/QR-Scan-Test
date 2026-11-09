@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Demo Điểm Danh Offline Bằng TOTP QR Code</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- QRCode.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <!-- CryptoJS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <!-- Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .progress-ring-circle {
+            transition: stroke-dashoffset 0.1s linear;
+            transform: rotate(-90deg);
+            transform-origin: 50% 50%;
+        }
+
+        /* Glassmorphism effects */
+        .glass-card {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(229, 231, 235, 0.8);
+        }
+    </style>
+</head>
+
+<body class="bg-slate-100 min-h-screen text-slate-800 p-4 lg:p-8">
+
+    <!-- Header Section -->
+    <header class="max-w-7xl mx-auto mb-6 text-center">
+        <div
+            class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold mb-2">
+            <i class="fa-solid fa-shield-halved"></i> Proof-of-Concept Kiến trúc Offline-First
+        </div>
+        <h1 class="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight">
+            Mô phỏng Điểm danh Offline bằng TOTP QR Code
+        </h1>
+        <p class="text-slate-500 text-sm mt-1 max-w-2xl mx-auto">
+            Server và Client cùng sở hữu một <span class="font-semibold text-indigo-600">Secret Key</span> chung. Khi
+            mất mạng, Client tự tính toán và đối chiếu mã QR dựa trên thời gian thực (<span
+                class="font-semibold text-indigo-600">TOTP 3s</span>) để báo thành công tức thì.
+        </p>
+    </header>
+
+    <!-- Shared Settings Bar -->
+    <div
+        class="max-w-7xl mx-auto mb-6 bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center font-bold">
+                <i class="fa-solid fa-key text-lg"></i>
+            </div>
+            <div>
+                <span class="text-xs text-slate-400 font-medium uppercase tracking-wider block">Secret Key Dùng
+                    Chung</span>
+                <div class="flex items-center gap-2">
+                    <input type="text" id="sharedSecretInput" value="MY_SUPER_SECRET_KEY_2026"
+                        class="font-mono text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-64">
+                    <button onclick="updateSecretKey()"
+                        class="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded text-slate-700 font-medium transition">
+                        Cập nhật
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="flex items-center gap-6 text-xs text-slate-600">
+            <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>Chu kỳ đổi mã: <strong class="text-slate-900">3 giây</strong></span>
+            </div>
+            <div class="flex items-center gap-2">
+                <i class="fa-solid fa-clock-rotate-left text-indigo-500"></i>
+                <span>Độ lệch thời gian: <strong class="text-slate-900">±1 chu kỳ (±3s)</strong></span>
+            </div>
+            <!-- Nút mở QR quét app mobile -->
+            <button onclick="toggleMobileConnectModal()" class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold transition shadow-sm">
+                <i class="fa-solid fa-mobile-screen"></i>
+                <span>Mở App Trên Điện Thoại</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Modal QR Code Kết Nối Điện Thoại Mobile -->
+    <div id="mobileConnectModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4">
+        <div class="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-slate-200 text-center relative">
+            <button onclick="toggleMobileConnectModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 text-lg w-8 h-8 rounded-full flex items-center justify-center">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            <div class="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center text-xl mx-auto mb-3">
+                <i class="fa-solid fa-camera"></i>
+            </div>
+            <h3 class="text-lg font-bold text-slate-900">Quét để mở Web Scanner</h3>
+            <p class="text-xs text-slate-500 mt-1 mb-4">Dùng camera điện thoại quét mã QR bên dưới để mở giao diện quét điểm danh thực tế (index.html):</p>
+            
+            <div class="flex justify-center p-3 bg-slate-50 rounded-2xl border border-slate-200 w-fit mx-auto">
+                <div id="mobileUrlQrContainer"></div>
+            </div>
+
+            <div class="mt-4 text-left bg-slate-100 p-3 rounded-xl text-xs font-mono text-slate-700 break-all">
+                <span class="text-[10px] text-slate-400 font-sans block mb-1 uppercase font-semibold">Địa chỉ URL mạng Wi-Fi:</span>
+                <span id="mobileUrlDisplay" class="font-bold text-indigo-600"></span>
+            </div>
+
+            <p class="text-[11px] text-slate-400 mt-3 text-left">
+                <i class="fa-solid fa-circle-info text-amber-500 mr-1"></i>
+                Lưu ý: Điện thoại và máy tính phải bắt chung mạng Wi-Fi.
+            </p>
+        </div>
+    </div>
+
+    <!-- Main Grid: 2 Screens Side by Side -->
+    <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+        <!-- ==================== LEFT SCREEN: WEBVIEW (SERVER DISPLAY) ==================== -->
+        <div
+            class="glass-card rounded-3xl p-6 shadow-xl relative overflow-hidden flex flex-col justify-between border-t-4 border-indigo-500">
+            <div class="flex items-center justify-between pb-4 border-b border-slate-100">
+                <div class="flex items-center gap-3">
+                    <div
+                        class="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+                        <i class="fa-solid fa-desktop text-lg"></i>
+                    </div>
+                    <div>
+                        <h2 class="font-bold text-slate-800 text-lg">Webview Server</h2>
+                        <p class="text-xs text-slate-400">Màn hình hiển thị QR tại lớp học / phòng họp</p>
+                    </div>
+                </div>
+                <span
+                    class="px-2.5 py-1 bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-full flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-indigo-600 animate-ping"></span> Live SSE Refresh
+                </span>
+            </div>
+
+            <!-- QR Code Display Area -->
+            <div class="my-6 flex flex-col items-center justify-center">
+                <!-- Circular Timer & QR Wrapper -->
+                <div
+                    class="relative p-6 bg-white rounded-3xl shadow-inner border border-slate-100 flex flex-col items-center">
+
+                    <!-- Progress Bar / Timer Ring -->
+                    <div class="w-full bg-slate-100 h-1.5 rounded-full mb-4 overflow-hidden">
+                        <div id="qrTimerProgress"
+                            class="bg-indigo-600 h-full w-full transition-all duration-100 ease-linear"></div>
+                    </div>
+
+                    <!-- QR Element Container -->
+                    <div id="qrcodeContainer"
+                        class="p-4 bg-white rounded-2xl shadow-sm border border-slate-200 flex items-center justify-center min-w-[200px] min-h-[200px]">
+                        <!-- QR Code dynamically injected here -->
+                    </div>
+
+                    <!-- Countdown Text -->
+                    <div class="mt-4 flex items-center gap-2 text-xs text-slate-500 font-medium">
+                        <i class="fa-solid fa-arrows-rotate text-indigo-500 animate-spin"></i>
+                        Mã mới sau: <span id="countdownText" class="font-bold text-indigo-600 text-sm">3.0</span>s
+                    </div>
+                </div>
+
+                <!-- Raw Token Info -->
+                <div class="w-full mt-4 bg-slate-900 text-slate-200 p-3 rounded-xl font-mono text-xs">
+                    <div class="text-slate-400 text-[10px] uppercase font-semibold mb-1 flex justify-between">
+                        <span>Payload TOTP QR (HMAC-SHA256)</span>
+                        <span id="currentWindowBlock" class="text-indigo-400">Block: 0</span>
+                    </div>
+                    <div id="tokenDisplay" class="truncate text-emerald-400 font-bold select-all">Generatig...</div>
+                </div>
+            </div>
+
+            <div class="bg-indigo-50/50 p-3 rounded-xl text-xs text-indigo-900 border border-indigo-100">
+                <i class="fa-solid fa-circle-info text-indigo-500 mr-1"></i>
+                Mã QR này được Server đổi liên tục mỗi 3s. Nếu kẻ gian chụp màn hình gửi đi nơi khác, khi máy bên kia
+                quét thì mã đã hết hạn.
+            </div>
+        </div>
+
+
+        <!-- ==================== RIGHT SCREEN: PHONE CLIENT (APP) ==================== -->
+        <div
+            class="glass-card rounded-3xl p-6 shadow-xl relative overflow-hidden flex flex-col justify-between border-t-4 border-emerald-500">
+
+            <!-- Phone Header & Network Toggle -->
+            <div>
+                <div class="flex items-center justify-between pb-4 border-b border-slate-100">
+                    <div class="flex items-center gap-3">
+                        <div
+                            class="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                            <i class="fa-solid fa-mobile-screen-button text-lg"></i>
+                        </div>
+                        <div>
+                            <h2 class="font-bold text-slate-800 text-lg">Phone Client</h2>
+                            <p class="text-xs text-slate-400">Ứng dụng điểm danh của học sinh / nhân viên</p>
+                        </div>
+                    </div>
+
+                    <!-- Network State Toggle Switch -->
+                    <div class="flex items-center bg-slate-100 p-1 rounded-full border border-slate-200">
+                        <button id="netOnlineBtn" onclick="setNetworkState(true)"
+                            class="px-3 py-1 rounded-full text-xs font-semibold transition flex items-center gap-1.5 bg-emerald-600 text-white shadow-sm">
+                            <i class="fa-solid fa-wifi"></i> Online
+                        </button>
+                        <button id="netOfflineBtn" onclick="setNetworkState(false)"
+                            class="px-3 py-1 rounded-full text-xs font-semibold transition flex items-center gap-1.5 text-slate-500 hover:text-slate-800">
+                            <i class="fa-solid fa-plane"></i> Offline
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Network Status Indicator Bar -->
+                <div id="netStatusBanner"
+                    class="mt-3 p-2.5 rounded-xl text-xs font-medium flex items-center justify-between bg-emerald-50 text-emerald-800 border border-emerald-200">
+                    <span class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                        Trạng thái mạng: <strong id="netStatusText">Đã kết nối Internet</strong>
+                    </span>
+                    <span id="syncPendingBadge"
+                        class="hidden px-2 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded-full">
+                        Chờ đồng bộ: 0
+                    </span>
+                </div>
+
+                <!-- User Session Context -->
+                <div
+                    class="mt-3 flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs">
+                    <div class="flex items-center gap-2">
+                        <img src="https://api.dicebear.com/7.x/bottts/svg?seed=User123"
+                            class="w-6 h-6 rounded-full bg-slate-200" alt="avatar">
+                        <span class="text-slate-700 font-semibold">Nguyễn Văn A (ID: SV98231)</span>
+                    </div>
+                    <span class="text-emerald-600 font-medium text-[11px] bg-emerald-100/60 px-2 py-0.5 rounded">
+                        <i class="fa-solid fa-check-circle"></i> JWT Ready
+                    </span>
+                </div>
+
+                <!-- Scan Action Area -->
+                <div class="mt-6 text-center">
+                    <button onclick="simulateScanQR()"
+                        class="w-full py-4 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold rounded-2xl shadow-lg shadow-emerald-600/30 transition flex items-center justify-center gap-2 text-base">
+                        <i class="fa-solid fa-qrcode text-xl"></i> Quét Mã QR Ngay Lúc Này
+                    </button>
+                    <p class="text-[11px] text-slate-400 mt-2">
+                        <i class="fa-solid fa-bolt text-amber-500 mr-1"></i> Giả lập camera bắt lấy Token từ Webview và
+                        tự tính toán đối chiếu
+                    </p>
+                </div>
+
+                <!-- Live Result Alert Box -->
+                <div id="scanResultAlert" class="mt-4 hidden p-4 rounded-2xl text-xs font-semibold transition-all">
+                    <!-- Dynamic message injected here -->
+                </div>
+            </div>
+
+            <!-- Local Attendance History -->
+            <div class="mt-6 border-t border-slate-100 pt-4">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs font-bold text-slate-700 uppercase tracking-wider">Lịch sử Điểm danh Cục bộ
+                        (Local)</span>
+                    <button onclick="clearLocalHistory()"
+                        class="text-[11px] text-slate-400 hover:text-red-500">Xóa</button>
+                </div>
+                <div id="localHistoryList" class="max-h-36 overflow-y-auto space-y-2 pr-1">
+                    <div class="text-center text-xs text-slate-400 py-4 italic">Chưa có lượt điểm danh nào</div>
+                </div>
+            </div>
+
+            <!-- Sync Button -->
+            <div class="mt-4 pt-3 border-t border-slate-100">
+                <button id="btnSyncServer" onclick="syncDataToServer()" disabled
+                    class="w-full py-2.5 bg-slate-200 text-slate-400 font-bold text-xs rounded-xl transition flex items-center justify-center gap-2 cursor-not-allowed">
+                    <i class="fa-solid fa-cloud-arrow-up"></i> Đồng Bộ Về Server (Background Sync)
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ==================== BOTTOM PANEL: SERVER DATABASE / LOGS ==================== -->
+    <div class="max-w-7xl mx-auto mt-8 bg-slate-900 text-slate-100 p-6 rounded-3xl shadow-2xl border border-slate-800">
+        <div class="flex items-center justify-between pb-4 border-b border-slate-800">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                    <i class="fa-solid fa-database"></i>
+                </div>
+                <div>
+                    <h3 class="font-bold text-sm text-white">Server Central Database & Logs</h3>
+                    <p class="text-[11px] text-slate-400">Dữ liệu chính thức ghi nhận sau khi Client đồng bộ Online
+                        thành công</p>
+                </div>
+            </div>
+            <button onclick="clearServerLogs()"
+                class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition">
+                Xóa Logs
+            </button>
+        </div>
+
+        <div class="mt-4 overflow-x-auto">
+            <table class="w-full text-left text-xs font-mono">
+                <thead>
+                    <tr class="text-slate-400 border-b border-slate-800 text-[11px]">
+                        <th class="pb-2">Thời Gian Quét (Offline)</th>
+                        <th class="pb-2">Thời Gian Đồng Bộ</th>
+                        <th class="pb-2">User ID</th>
+                        <th class="pb-2">TOTP Token</th>
+                        <th class="pb-2">Trạng Thái Server</th>
+                    </tr>
+                </thead>
+                <tbody id="serverLogsBody">
+                    <tr>
+                        <td colspan="5" class="text-center text-slate-600 py-6 italic font-sans text-xs">
+                            Chưa có dữ liệu nào được đồng bộ lên Server
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Application Core Script -->
+    <script>
+        // ==================== STATE MANAGEMENT ====================
+        let SECRET_KEY = "MY_SUPER_SECRET_KEY_2026";
+        const INTERVAL_SECONDS = 3; // TOTP Refresh Interval (3 Seconds)
+        let isOnline = true;
+
+        let currentTOTPToken = "";
+        let qrcodeObj = null;
+        let localAttendanceList = []; // Local storage queue
+        let serverLogs = [];
+
+        // Dynamic timer state
+        let nextChangeTime = Date.now() + (INTERVAL_SECONDS * 1000);
+
+        // ==================== INITIALIZATION ====================
+        window.onload = function () {
+            // Init QRCode Container
+            const qrContainer = document.getElementById("qrcodeContainer");
+            qrcodeObj = new QRCode(qrContainer, {
+                text: "INIT",
+                width: 180,
+                height: 180,
+                colorDark: "#1e1b4b",
+                colorLight: "#ffffff",
+                correctLevel: QRCode.CorrectLevel.M
+            });
+
+            // Start Main TOTP Loop
+            updateTOTPLoop();
+            setInterval(updateTOTPLoop, 100); // High precision timer check
+
+            initMobileConnectQR();
+        };
+
+        let mobileQrObj = null;
+        function initMobileConnectQR() {
+            // Xác định URL cho mobile quét
+            const host = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+                ? '192.168.1.19' 
+                : window.location.hostname;
+            const port = window.location.port ? `:${window.location.port}` : '';
+            const mobileUrl = `${window.location.protocol}//${host}${port}/index.html`;
+
+            const displayEl = document.getElementById("mobileUrlDisplay");
+            if (displayEl) displayEl.innerText = mobileUrl;
+
+            const qrContainer = document.getElementById("mobileUrlQrContainer");
+            if (qrContainer && !mobileQrObj) {
+                mobileQrObj = new QRCode(qrContainer, {
+                    text: mobileUrl,
+                    width: 160,
+                    height: 160,
+                    colorDark: "#0f172a",
+                    colorLight: "#ffffff",
+                    correctLevel: QRCode.CorrectLevel.M
+                });
+            }
+        }
+
+        function toggleMobileConnectModal() {
+            const modal = document.getElementById("mobileConnectModal");
+            if (modal) {
+                modal.classList.toggle("hidden");
+            }
+        }
+
+        // ==================== TOTP GENERATION LOGIC ====================
+        function getTOTPToken(secret, offsetBlocks = 0) {
+            // Current Time Block (3s windows)
+            const timeBlock = Math.floor(Date.now() / (INTERVAL_SECONDS * 1000)) + offsetBlocks;
+            // HMAC-SHA256 băm timeBlock + Secret
+            const hash = CryptoJS.HmacSHA256(timeBlock.toString(), secret);
+            // Lấy 10 ký tự Hex viết hoa
+            return hash.toString(CryptoJS.enc.Hex).substring(0, 10).toUpperCase();
+        }
+
+        function updateTOTPLoop() {
+            const now = Date.now();
+            const timeStep = INTERVAL_SECONDS * 1000;
+            const currentBlock = Math.floor(now / timeStep);
+
+            // Calculate progress inside 3s interval
+            const elapsed = now % timeStep;
+            const remainingSec = ((timeStep - elapsed) / 1000).toFixed(1);
+            const progressPercent = (1 - (elapsed / timeStep)) * 100;
+
+            // Update UI elements for Timer
+            document.getElementById("qrTimerProgress").style.width = `${progressPercent}%`;
+            document.getElementById("countdownText").innerText = remainingSec;
+            document.getElementById("currentWindowBlock").innerText = `Block: ${currentBlock}`;
+
+            // Generate TOTP for Current Time Block
+            const newToken = getTOTPToken(SECRET_KEY, 0);
+
+            // Re-render QR Code if Token Changed
+            if (newToken !== currentTOTPToken) {
+                currentTOTPToken = newToken;
+                qrcodeObj.clear();
+                qrcodeObj.makeCode(currentTOTPToken);
+                document.getElementById("tokenDisplay").innerText = currentTOTPToken;
+            }
+        }
+
+        function updateSecretKey() {
+            const inputVal = document.getElementById("sharedSecretInput").value.trim();
+            if (inputVal) {
+                SECRET_KEY = inputVal;
+                alert("Đã cập nhật Secret Key mới cho cả Server và Client!");
+            }
+        }
+
+        // ==================== PHONE CLIENT LOGIC ====================
+        function setNetworkState(online) {
+            isOnline = online;
+            const netOnlineBtn = document.getElementById("netOnlineBtn");
+            const netOfflineBtn = document.getElementById("netOfflineBtn");
+            const banner = document.getElementById("netStatusBanner");
+            const netStatusText = document.getElementById("netStatusText");
+
+            if (online) {
+                netOnlineBtn.className = "px-3 py-1 rounded-full text-xs font-semibold transition flex items-center gap-1.5 bg-emerald-600 text-white shadow-sm";
+                netOfflineBtn.className = "px-3 py-1 rounded-full text-xs font-semibold transition flex items-center gap-1.5 text-slate-500 hover:text-slate-800";
+
+                banner.className = "mt-3 p-2.5 rounded-xl text-xs font-medium flex items-center justify-between bg-emerald-50 text-emerald-800 border border-emerald-200";
+                netStatusText.innerText = "Đã kết nối Internet";
+            } else {
+                netOfflineBtn.className = "px-3 py-1 rounded-full text-xs font-semibold transition flex items-center gap-1.5 bg-amber-600 text-white shadow-sm";
+                netOnlineBtn.className = "px-3 py-1 rounded-full text-xs font-semibold transition flex items-center gap-1.5 text-slate-500 hover:text-slate-800";
+
+                banner.className = "mt-3 p-2.5 rounded-xl text-xs font-medium flex items-center justify-between bg-amber-50 text-amber-800 border border-amber-200";
+                netStatusText.innerText = "Ngoại tuyến (Offline Mode)";
+            }
+            updateSyncButtonState();
+        }
+
+        function simulateScanQR() {
+            // Giả lập quét: Lấy mã Token hiện tại đang hiển thị trên Server
+            const scannedToken = currentTOTPToken;
+            const scanTimestamp = new Date();
+
+            // OFFLINE VERIFICATION LOGIC (TOTP Window Check)
+            // Cho phép sai số ±1 chu kỳ thời gian (Block hiện tại, Block trước, Block sau)
+            const validTokenCurrent = getTOTPToken(SECRET_KEY, 0);
+            const validTokenPrev = getTOTPToken(SECRET_KEY, -1);
+            const validTokenNext = getTOTPToken(SECRET_KEY, 1);
+
+            const isValid = (scannedToken === validTokenCurrent || scannedToken === validTokenPrev || scannedToken === validTokenNext);
+
+            const alertBox = document.getElementById("scanResultAlert");
+            alertBox.classList.remove("hidden", "bg-emerald-100", "text-emerald-800", "border-emerald-300", "bg-red-100", "text-red-800", "border-red-300");
+
+            if (isValid) {
+                // Verified Successfully Offline
+                alertBox.classList.add("bg-emerald-100", "text-emerald-900", "border", "border-emerald-300");
+                alertBox.innerHTML = `
+                    <div class="flex items-start gap-2.5">
+                        <i class="fa-solid fa-circle-check text-emerald-600 text-lg mt-0.5"></i>
+                        <div>
+                            <strong class="block text-sm font-bold">Điểm Danh Thành Công!</strong>
+                            <p class="text-[11px] opacity-90 mt-0.5">
+                                [Xác thực Offline] Thuật toán TOTP khớp hoàn toàn với Secret Key thiết bị.
+                            </p>
+                            <span class="inline-block mt-1 text-[10px] bg-emerald-200/60 text-emerald-900 font-mono px-1.5 py-0.5 rounded">
+                                Token: ${scannedToken}
+                            </span>
+                        </div>
+                    </div>
+                `;
+
+                // Add to Local Storage Queue
+                const record = {
+                    id: "REC_" + Date.now(),
+                    userId: "SV98231",
+                    userName: "Nguyễn Văn A",
+                    timestamp: scanTimestamp.toLocaleTimeString() + " " + scanTimestamp.toLocaleDateString(),
+                    token: scannedToken,
+                    synced: false
+                };
+                localAttendanceList.unshift(record);
+                renderLocalHistory();
+            } else {
+                // Invalid or Expired Code
+                alertBox.classList.add("bg-red-100", "text-red-900", "border", "border-red-300");
+                alertBox.innerHTML = `
+                    <div class="flex items-start gap-2.5">
+                        <i class="fa-solid fa-triangle-exclamation text-red-600 text-lg mt-0.5"></i>
+                        <div>
+                            <strong class="block text-sm font-bold">Mã QR Không Hợp Lệ Hoặc Đã Hết Hạn!</strong>
+                            <p class="text-[11px] opacity-90 mt-0.5">
+                                Mã quét được không nằm trong cửa sổ thời gian ±3s của thuật toán TOTP.
+                            </p>
+                        </div>
+                    </div>
+                `;
+            }
+            updateSyncButtonState();
+        }
+
+        function renderLocalHistory() {
+            const container = document.getElementById("localHistoryList");
+            if (localAttendanceList.length === 0) {
+                container.innerHTML = `<div class="text-center text-xs text-slate-400 py-4 italic">Chưa có lượt điểm danh nào</div>`;
+                return;
+            }
+
+            container.innerHTML = localAttendanceList.map(item => `
+                <div class="p-2.5 bg-white rounded-xl border border-slate-200 flex items-center justify-between text-xs">
+                    <div>
+                        <div class="font-bold text-slate-800 flex items-center gap-1.5">
+                            <i class="fa-solid fa-clock text-slate-400 text-[10px]"></i> ${item.timestamp}
+                        </div>
+                        <div class="font-mono text-[10px] text-slate-400">Token: ${item.token}</div>
+                    </div>
+                    <span class="${item.synced ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'} px-2 py-0.5 rounded-md font-bold text-[10px] flex items-center gap-1">
+                        <i class="fa-solid ${item.synced ? 'fa-check' : 'fa-spinner animate-spin'}"></i>
+                        ${item.synced ? 'Đã đồng bộ' : 'Chờ sync'}
+                    </span>
+                </div>
+            `).join('');
+
+            // Update badge count
+            const pendingCount = localAttendanceList.filter(i => !i.synced).length;
+            const badge = document.getElementById("syncPendingBadge");
+            if (pendingCount > 0) {
+                badge.classList.remove("hidden");
+                badge.innerText = `Chờ đồng bộ: ${pendingCount}`;
+            } else {
+                badge.classList.add("hidden");
+            }
+        }
+
+        function clearLocalHistory() {
+            localAttendanceList = [];
+            renderLocalHistory();
+            updateSyncButtonState();
+        }
+
+        function updateSyncButtonState() {
+            const btn = document.getElementById("btnSyncServer");
+            const pendingItems = localAttendanceList.filter(i => !i.synced);
+
+            if (isOnline && pendingItems.length > 0) {
+                btn.disabled = false;
+                btn.className = "w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer";
+            } else {
+                btn.disabled = true;
+                btn.className = "w-full py-2.5 bg-slate-200 text-slate-400 font-bold text-xs rounded-xl transition flex items-center justify-center gap-2 cursor-not-allowed";
+            }
+        }
+
+        // ==================== BACKGROUND SYNC LOGIC ====================
+        function syncDataToServer() {
+            if (!isOnline) return;
+
+            const pendingItems = localAttendanceList.filter(i => !i.synced);
+            if (pendingItems.length === 0) return;
+
+            const syncTime = new Date().toLocaleTimeString();
+
+            // Simulate Network Syncing to Server
+            pendingItems.forEach(item => {
+                item.synced = true;
+                serverLogs.unshift({
+                    scanTime: item.timestamp,
+                    syncTime: syncTime,
+                    userId: item.userId + " (" + item.userName + ")",
+                    token: item.token,
+                    status: "200 OK (Verified)"
+                });
+            });
+
+            renderLocalHistory();
+            renderServerLogs();
+            updateSyncButtonState();
+
+            alert(`Đã đồng bộ thành công ${pendingItems.length} bản ghi điểm danh lên Server Central Database!`);
+        }
+
+        function renderServerLogs() {
+            const tbody = document.getElementById("serverLogsBody");
+            if (serverLogs.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" class="text-center text-slate-600 py-6 italic font-sans text-xs">
+                            Chưa có dữ liệu nào được đồng bộ lên Server
+                        </td>
+                    </tr>`;
+                return;
+            }
+
+            tbody.innerHTML = serverLogs.map(log => `
+                <tr class="border-b border-slate-800/60 hover:bg-slate-800/30 transition">
+                    <td class="py-2.5 text-slate-300">${log.scanTime}</td>
+                    <td class="py-2.5 text-indigo-400">${log.syncTime}</td>
+                    <td class="py-2.5 text-slate-200 font-bold">${log.userId}</td>
+                    <td class="py-2.5 text-emerald-400">${log.token}</td>
+                    <td class="py-2.5">
+                        <span class="px-2 py-0.5 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded text-[10px] font-bold">
+                            ${log.status}
+                        </span>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function clearServerLogs() {
+            serverLogs = [];
+            renderServerLogs();
+        }
+    </script>
+</body>
+
+</html>
